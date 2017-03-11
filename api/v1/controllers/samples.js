@@ -38,7 +38,18 @@ module.exports = {
    * @param {Function} next - The next middleware function in the stack
    */
   deleteSample(req, res, next) {
-    doDelete(req, res, next, helper);
+    if (featureToggles.isFeatureEnabled(constants.featureName)) {
+      const resultObj = { reqStartTime: new Date() }; // for logging
+      const sampleName = req.swagger.params.key.value.toLowerCase();
+      redisModelSample.deleteSample(sampleName, resultObj, req.method)
+      .then((response) => {
+        u.logAPI(req, resultObj, response); // audit log
+        res.status(httpStatus.OK).json(response);
+      })
+      .catch((err) => u.handleError(next, err, helper.modelName));
+    } else {
+      doDelete(req, res, next, helper);
+    }
   },
 
   /**

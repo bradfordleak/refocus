@@ -21,6 +21,10 @@ const defaults = require('../../config').api.defaults;
 const redisErrors = require('../redisErrors');
 const sampleUtils = require('../../db/helpers/sampleUtils');
 const dbConstants = require('../../db/constants');
+const redisOps = require('../redisOps');
+const aspectType = redisOps.aspectType;
+const sampleType = redisOps.sampleType;
+const subjectType = redisOps.subjectType;
 const sampFields = {
   MSG_BODY: 'messageBody',
   MSG_CODE: 'messageCode',
@@ -43,6 +47,7 @@ const sampleFieldsArr = Object.keys(sampFields).map(
 const ZERO = 0;
 const ONE = 1;
 const TWO = 2;
+const THREE = 3;
 const MINUS_ONE = -1;
 
 /**
@@ -450,6 +455,58 @@ function upsertOneSample(sampleQueryBodyObj, method, isBulk) {
 }
 
 module.exports = {
+
+  /**
+   * Delete sample. Get sample. If found, get aspect, delete sample entry from
+   * sample index, delete aspect from subject set and delete sample hash. If
+   * sample not found, thro Not found error.
+   * @param  {String} sampleName - Sample name
+   * @param  {Object} logObject - Log object
+   * @param  {String} method - Type of request method
+   * @returns {Promise} - Resolves to a sample object
+   */
+  deleteSample(sampleName, logObject, method) {
+    const subjAspArr = sampleName.toLowerCase().split('|');
+
+    if (subjAspArr.length < TWO) {
+      const err = new redisErrors.ValidationError({
+        explanation: 'Incorrect sample name.',
+      });
+      return Promise.resolve(err);
+    }
+
+    const subjAbsPath = subjAspArr[ZERO];
+    const aspName = subjAspArr[ONE];
+    const cmds = [];
+    let sampObjToReturn;
+
+    return redisOps.getHashPromise(sampleType, sampleName)
+    .then((sampleObj) => {
+      if (!sampleObj) {
+        throw new redisErrors.ResourceNotFoundError({
+          explanation: 'Sample not found.',
+        });
+      }
+
+      sampObjToReturn = sampleObj;
+    })
+    .then(() => {
+      cmds.push(redisOps.getHashCmd(aspectType, aspName));
+      cmds.push(redisOps.delKeyFromIndexCmd(sampleType, sampleName));
+      cmds.push(redisOps.delAspFromSubjSetCmd(subjAbsPath, aspName));
+      cmds.push(redisOps.delHashCmd(sampleType, sampleName));
+
+      return redisOps.executeBatchCmds(cmds);
+    })
+    .then((response) => {
+      logObject.dbTime = new Date() - logObject.reqStartTime; // log db time
+      const asp = response[ZERO];
+
+      // attach aspect and links to sample
+      const resSampAsp = cleanAddAspectToSample(sampObjToReturn, asp, method);
+      return resSampAsp;
+    });
+  },
 
   /**
    * Retrieves the sample from redis and sends it back in the response. Get
