@@ -509,6 +509,62 @@ module.exports = {
   },
 
   /**
+   * [patchSample description]
+   * @param  {[type]} sampleName [description]
+   * @param  {[type]} logObject  [description]
+   * @param  {[type]} method     [description]
+   * @param  {[type]} params     [description]
+   * @return {[type]}            [description]
+   */
+  patchSample(params, logObject, method) {
+    const sampleName = params.key.value;
+    const reqBody = params.queryBody.value;
+    cleanQueryBodyObj(reqBody);
+    let currSampObj;
+    let aspectObj;
+
+    redisOps.getHashPromise(sampleType, sampleName)
+    .then((sampObj) => {
+      if (!sampObj) {
+        throw new redisErrors.ResourceNotFoundError({
+          explanation: 'Sample not found.',
+        });
+      }
+
+      currSampObj = sampObj;
+      const aspectName = sampleName.split('|')[ONE];
+      return redisOps.getHashPromise(aspectType, aspectName);
+    })
+    .then((aspObj) => {
+      if (!aspObj) {
+        throw new redisErrors.ResourceNotFoundError({
+          explanation: 'Aspect not found.',
+        });
+      }
+
+      if (reqBody.value) {
+        const status = sampleUtils.computeStatus(aspObj, reqBody.value);
+        if (currSampObj[sampFields.STATUS] !== status) {
+          reqBody[sampFields.PRVS_STATUS] = currSampObj[sampFields.STATUS];
+          reqBody[sampFields.STS_CHNGED_AT] = new Date().toString();
+          reqBody[sampFields.STATUS] = status;
+          reqBody[sampFields.UPD_AT] = new Date().toString();
+        }
+      }
+
+      if (reqBody.relatedLinks) {
+        reqBody[sampFields.RLINKS] = JSON.stringify(reqBody.relatedLinks);
+      }
+
+      return redisOps.setHashMultiPromise(sampleName, reqBody);
+    })
+    .then(() => redisOps.getHashPromise(sampleType, sampleName))
+    .then((updatedSamp) =>
+      cleanAddAspectToSample(updatedSamp, aspectObj, method)
+     );
+  },
+
+  /**
    * Retrieves the sample from redis and sends it back in the response. Get
    * sample and corresponsing aspect from redis and then apply field list
    * filter is needed. Then attach aspect to sample and return.

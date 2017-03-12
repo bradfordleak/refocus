@@ -129,7 +129,18 @@ module.exports = {
    * @param {Function} next - The next middleware function in the stack
    */
   patchSample(req, res, next) {
-    doPatch(req, res, next, helper);
+    if (featureToggles.isFeatureEnabled(constants.featureName)) {
+      const resultObj = { reqStartTime: new Date() }; // for logging
+      const params = req.swagger.params;
+      redisModelSample.patchSample(params, resultObj, req.method)
+      .then((response) => {
+        u.logAPI(req, resultObj, response); // audit log
+        res.status(httpStatus.OK).json(response);
+      })
+      .catch((err) => u.handleError(next, err, helper.modelName));
+    } else {
+      doPatch(req, res, next, helper);
+    }
   },
 
   /**

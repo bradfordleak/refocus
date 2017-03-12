@@ -330,6 +330,10 @@ module.exports = {
     return redisClient.hgetallAsync(redisStore.toKey(type, name));
   },
 
+  setHashMultiPromise(type, name, kvObj) {
+    return redisClient.hmsetAsync(redisStore.toKey(type, name), kvObj);
+  }
+
   /**
    * Execute command asynchronously
    * @param  {Array} cmds - array of commands
