@@ -132,8 +132,19 @@ module.exports = {
     if (featureToggles.isFeatureEnabled(constants.featureName)) {
       const resultObj = { reqStartTime: new Date() }; // for logging
       const params = req.swagger.params;
+
+      const rLinks = params.queryBody.value.relatedLinks;
+      if (rLinks) {
+        u.checkDuplicateRLinks(rLinks);
+      }
+
       redisModelSample.patchSample(params, resultObj, req.method)
       .then((response) => {
+        // loop through remove values to delete property
+        if (helper.fieldsToExclude) {
+          u.removeFieldsFromResponse(helper.fieldsToExclude, response);
+        }
+
         u.logAPI(req, resultObj, response); // audit log
         res.status(httpStatus.OK).json(response);
       })
@@ -184,6 +195,10 @@ module.exports = {
   upsertSample(req, res, next) {
     const resultObj = { reqStartTime: new Date() };
     const sampleQueryBody = req.swagger.params.queryBody.value;
+
+    if (sampleQueryBody.relatedLinks) {
+      u.checkDuplicateRLinks(sampleQueryBody.relatedLinks);
+    }
 
     u.getUserNameFromToken(req,
       featureToggles.isFeatureEnabled('enforceWritePermission'))

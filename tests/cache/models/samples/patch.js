@@ -7,7 +7,7 @@
  */
 
 /**
- * * tests/cache/models/samples/patch.js
+ * tests/cache/models/samples/patch.js
  */
 'use strict'; // eslint-disable-line strict
 
@@ -20,11 +20,36 @@ const rtu = require('../redisTestUtil');
 const redisOps = require('../../../../cache/redisOps');
 const objectType = require('../../../../cache/sampleStore')
                     .constants.objectType;
+const samstoinit = require('../../../../cache/sampleStoreInit');
 const expect = require('chai').expect;
 const Sample = tu.db.Sample;
 const ZERO = 0;
+const aspectToCreate = {
+  description: 'this is a0 description',
+  imageUrl: 'http://www.bar.com/a0.jpg',
+  isPublished: true,
+  name: `${tu.namePrefix}TEST_ASPECT`,
+  timeout: '30s',
+  valueLabel: 's',
+  valueType: 'NUMERIC',
+  criticalRange: [0, 1],
+  warningRange: [2, 3],
+  infoRange: [4, 5],
+  okRange: [6, 7],
+};
 
-describe(`api: PATCH ${path}`, () => {
+const subjectToCreate = {
+  description: 'this is sample description',
+  help: {
+    email: 'sample@bar.com',
+    url: 'http://www.bar.com/a0',
+  },
+  imageUrl: 'http://www.bar.com/a0.jpg',
+  isPublished: true,
+  name: `${tu.namePrefix}TEST_SUBJECT`,
+};
+
+describe(`api: cache: PATCH ${path}`, () => {
   let sampleName;
   let sampUpdatedAt;
   let sampleValue;
@@ -40,47 +65,34 @@ describe(`api: PATCH ${path}`, () => {
     .catch((err) => done(err));
   });
 
-  beforeEach(rtu.populateRedis);
+  beforeEach((done) => {
+    const samp = { value: '1' };
+    tu.db.Aspect.create(aspectToCreate)
+    .then((a) => {
+      samp.aspectId = a.id;
+      return tu.db.Subject.create(subjectToCreate);
+    })
+    .then((s) => {
+      samp.subjectId = s.id;
+      return samp;
+    })
+    .then((sampObj) => Sample.create(sampObj))
+    .then((sample) => {
+      sampleName = sample.name;
+      return samstoinit.eradicate();
+    })
+    .then(() => samstoinit.init())
+    .then(() => redisOps.getHashPromise(objectType.sample, sampleName))
+    .then((sampleObj) => {
+      sampUpdatedAt = new Date(sampleObj.updatedAt);
+      sampleValue = sampleObj.value;
+      done();
+    })
+    .catch((err) => done(err));
+  });
+
   afterEach(rtu.forceDelete);
   after(() => tu.toggleOverride('enableRedisSampleStore', false));
-
-  describe('UpdatedAt tests: ', () => {
-    it.only('patch /samples without value does not increment ' +
-      'updatedAt', (done) => {
-      api.patch(`${path}/${sampleName}`)
-      .set('Authorization', token)
-      .send({})
-      .expect(constants.httpStatus.OK)
-      .end((err, res) => {
-        if (err) {
-          done(err);
-        }
-
-        const result = res.body;
-        const dateToInt = new Date(result.updatedAt).getTime();
-        expect(dateToInt).to.be.equal(sampUpdatedAt.getTime());
-        done();
-      });
-    });
-
-    it('patch /samples with only identical value increments ' +
-      'updatedAt', (done) => {
-      api.patch(`${path}/${sampleName}`)
-      .set('Authorization', token)
-      .send({ value: sampleValue })
-      .expect(constants.httpStatus.OK)
-      .end((err, res) => {
-        if (err) {
-          done(err);
-        }
-
-        const result = res.body;
-        const dateToInt = new Date(result.updatedAt).getTime();
-        expect(dateToInt).to.be.above(sampUpdatedAt.getTime());
-        done();
-      });
-    });
-  });
 
   describe('Lists: ', () => {
     it('basic patch does not return id', (done) => {
@@ -119,7 +131,7 @@ describe(`api: PATCH ${path}`, () => {
     });
 
     it('updates case sensitive name successfully', (done) => {
-      const name = u.sampleName;
+      const name = sampleName;
       const updatedName = name.toUpperCase();
       api.patch(`${path}/${name}`)
       .set('Authorization', token)
@@ -136,10 +148,6 @@ describe(`api: PATCH ${path}`, () => {
     });
   });
 
-  //
-  // The relatedlinks are named differently in each of the tests to avoid
-  // turning the before and after hooks to beforeEach and afterEach
-  //
   describe('Patch Related Links ', () => {
     it('single related link', (done) => {
       api.patch(`${path}/${sampleName}`)
@@ -213,68 +221,57 @@ describe(`api: PATCH ${path}`, () => {
           { name: 'link4', url: 'https://samples.com' },
         ],
       })
-      .expect((res) => {
-        expect(res.body).to.have.property('errors');
-        expect(res.body.errors[ZERO].message)
-        .to.contain('Name of the relatedlinks should be unique');
-        expect(res.body.errors[ZERO].source)
-          .to.contain('relatedLinks');
-      })
-      .end((err/* , res */) => {
+      .end((err, res) => {
         if (err) {
           done(err);
         }
 
+        expect(res.body).to.have.property('errors');
+        expect(res.body.errors[ZERO].description)
+        .to.contain('Name of the relatedlinks should be unique');
+        done();
+      });
+    });
+  });
+
+  describe('UpdatedAt tests: ', () => {
+    it('patch /samples without value does not increment ' +
+      'updatedAt', (done) => {
+      api.patch(`${path}/${sampleName}`)
+      .set('Authorization', token)
+      .send({})
+      .expect(constants.httpStatus.OK)
+      .end((err, res) => {
+        if (err) {
+          done(err);
+        }
+
+        const result = res.body;
+        const dateToInt = new Date(result.updatedAt).getTime();
+        expect(dateToInt).to.be.equal(sampUpdatedAt.getTime());
+        done();
+      });
+    });
+
+    it('patch /samples with only identical value increments ' +
+      'updatedAt', (done) => {
+      // preventing setTimeout by setting sampUpdatedAt 2 secs back.
+      sampUpdatedAt.setSeconds(sampUpdatedAt.getSeconds() - 2);
+      api.patch(`${path}/${sampleName}`)
+      .set('Authorization', token)
+      .send({ value: sampleValue })
+      .expect(constants.httpStatus.OK)
+      .end((err, res) => {
+        if (err) {
+          done(err);
+        }
+
+        const result = res.body;
+        const dateToInt = new Date(result.updatedAt).getTime();
+        expect(dateToInt).to.be.above(sampUpdatedAt.getTime());
         done();
       });
     });
   });
 });
 
-describe(`api: PATCH ${path} aspect isPublished false`, () => {
-  let sampleName;
-  let token;
-
-  before((done) => {
-    tu.createToken()
-    .then((returnedToken) => {
-      token = returnedToken;
-      done();
-    })
-    .catch(done);
-  });
-
-  before((done) => {
-    u.doSetup()
-    .then((samp) => Sample.create(samp))
-    .then((samp) => {
-      sampleName = samp.name;
-      samp.getAspect()
-      .then((asp) => {
-        asp.update({ isPublished: false });
-        done();
-      })
-      .catch((err) => {
-        throw err;
-      });
-    })
-    .catch(done);
-  });
-
-  afterEach(u.forceDelete);
-  after(tu.forceDeleteUser);
-
-  it('cannot patch sample if aspect not published', (done) => {
-    api.patch(`${path}/${sampleName}`)
-    .set('Authorization', token)
-    .send({ value: '3' })
-    .expect(constants.httpStatus.NOT_FOUND)
-    .end((err /* , res */) => {
-      if (err) {
-        done(err);
-      }
-
-      done();
-    });
-  });
-});

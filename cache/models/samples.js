@@ -509,12 +509,14 @@ module.exports = {
   },
 
   /**
-   * [patchSample description]
-   * @param  {[type]} sampleName [description]
-   * @param  {[type]} logObject  [description]
-   * @param  {[type]} method     [description]
-   * @param  {[type]} params     [description]
-   * @return {[type]}            [description]
+   * Patch sample. First get sample, if not found, throw error, else get aspect.
+   * Update request body with required fields based on value and related links
+   * if needed. Update sample. Then get updated sample, attach aspect and return
+   * response.
+   * @param  {Object} params - Request parameters
+   * @param  {Object} logObject - Log object
+   * @param  {String} method - Type of request method
+   * @returns {Promise} - Resolves to a sample object
    */
   patchSample(params, logObject, method) {
     const sampleName = params.key.value;
@@ -523,7 +525,7 @@ module.exports = {
     let currSampObj;
     let aspectObj;
 
-    redisOps.getHashPromise(sampleType, sampleName)
+    return redisOps.getHashPromise(sampleType, sampleName)
     .then((sampObj) => {
       if (!sampObj) {
         throw new redisErrors.ResourceNotFoundError({
@@ -543,20 +545,25 @@ module.exports = {
       }
 
       if (reqBody.value) {
+        aspectObj = sampleStore.arrayStringsToJson(
+          aspObj, constants.fieldsToStringify.aspect
+        );
+
         const status = sampleUtils.computeStatus(aspObj, reqBody.value);
         if (currSampObj[sampFields.STATUS] !== status) {
           reqBody[sampFields.PRVS_STATUS] = currSampObj[sampFields.STATUS];
           reqBody[sampFields.STS_CHNGED_AT] = new Date().toString();
           reqBody[sampFields.STATUS] = status;
-          reqBody[sampFields.UPD_AT] = new Date().toString();
         }
+
+        reqBody[sampFields.UPD_AT] = new Date().toString();
       }
 
       if (reqBody.relatedLinks) {
         reqBody[sampFields.RLINKS] = JSON.stringify(reqBody.relatedLinks);
       }
 
-      return redisOps.setHashMultiPromise(sampleName, reqBody);
+      return redisOps.setHashMultiPromise(sampleType, sampleName, reqBody);
     })
     .then(() => redisOps.getHashPromise(sampleType, sampleName))
     .then((updatedSamp) =>

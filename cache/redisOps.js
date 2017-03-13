@@ -330,9 +330,20 @@ module.exports = {
     return redisClient.hgetallAsync(redisStore.toKey(type, name));
   },
 
+  /**
+   * Set multiple fields in a hash
+   * @param  {String} type - Object type
+   * @param  {String} name - Object name
+   * @param {Object} kvObj - Key value pairs
+   * @returns {Promise} - Resolves to nothing if no key value, else "OK"
+   */
   setHashMultiPromise(type, name, kvObj) {
+    if (Object.keys(kvObj).length === 0) {
+      return Promise.resolve();
+    }
+
     return redisClient.hmsetAsync(redisStore.toKey(type, name), kvObj);
-  }
+  },
 
   /**
    * Execute command asynchronously
